@@ -1,79 +1,87 @@
 #include <msp430.h>
 
-// ID storage array. This will hold the ID we receive.
-char id[17];
-// This variable keeps track of how many characters we've received so far.
-unsigned int idx = 0;
+char id[17];                // Array to store the ID
+unsigned int idx = 0;       // To track received characters
 
-// Function declaration: Will be used to check if an ID is valid.
-uint8_t isValidID(char *id);  
+uint8_t isValidID(char *id);  // Function declaration to check ID validity
 
 void main(void)
 {
-    // Stop watchdog timer. This is always done to prevent system resets.
-    WDTCTL = WDTPW | WDTHOLD;
+    WDTCTL = WDTPW | WDTHOLD;  // Stop watchdog timer
 
-    // Set up the LEDs.
-    // We will use LED1 for "valid" and LED2 for "invalid".
-    P1DIR |= BIT0; // Make P1.0 (LED1) an output
-    P2DIR |= BIT0; // Make P2.0 (LED2) an output
+    P1DIR |= BIT0;             // Set P1.0 as output (Green LED)
+    P2DIR |= BIT1;             // Set P2.1 as output (Red LED)
 
-    // Set up UART (for communication with the PC).
-    P1SEL0 |= BIT4 | BIT5;              // Set P1.4 and P1.5 for UART mode
-    UCA0CTLW0 = UCSWRST;                // Put UART in reset mode for configuration
-    UCA0CTLW0 |= UCSSEL_2;              // Use SMCLK
-    UCA0BR0 = 8;                        // Set baud rate to 115200
-    UCA0BR1 = 0;
-    UCA0MCTLW = 0xD600;
-    UCA0CTLW0 &= ~UCSWRST;              // Initialize UART
-    UCA0IE |= UCRXIE;                   // Enable UART receive interrupt
+    // UART Configuration
+    P1SEL0 |= BIT4 | BIT5;     // Set P1.4 and P1.5 as UART pins
+    UCA0CTLW0 = UCSWRST;       // Put eUSCI in reset
+    UCA0CTLW0 |= UCSSEL_2;     // Choose clock source as SMCLK
+    UCA0BR0 = 8;               // Set baud rate to 115200
+    UCA0BR1 = 0;  
+    UCA0MCTLW |= UCOS16 | UCBRF_10 | UCBRS_0; 
+    UCA0CTLW0 &= ~UCSWRST;     // Initialize eUSCI
+    UCA0IE |= UCRXIE;          // Enable USCI_A0 RX interrupt
+
+    __bis_SR_register(GIE);    // Enable general interrupts
 
     while (1)
     {
-        // Once we've received a full 16-character ID, validate it.
-        if (idx == 16) {
-            id[idx] = '\0';  // Add a null terminator to the ID string
-            idx = 0;        // Reset the character count for next time
+        if (idx == 16)
+        {
+            id[idx] = '\0';
+            idx = 0;
 
-            // Use our validation function to check the ID.
-            if (isValidID(id)) {
-                P1OUT |= BIT0;          // Turn on LED1 (green)
-                __delay_cycles(500000);  // Wait 0.5 seconds
-                P1OUT &= ~BIT0;         // Turn off LED1
-            } else {
-                P2OUT |= BIT0;          // Turn on LED2 (red)
-                __delay_cycles(1000000);  // Wait 1 second
-                P2OUT &= ~BIT0;         // Turn off LED2
+            if (isValidID(id))
+            {
+                P1OUT |= BIT0;
+                __delay_cycles(500000);
+                P1OUT &= ~BIT0;
+            }
+            else
+            {
+                P2OUT |= BIT1;
+                __delay_cycles(1000000);
+                P2OUT &= ~BIT1;
             }
         }
     }
 }
 
-// This is an interrupt service routine. It gets called whenever we receive a character via UART.
-#pragma vector = USCI_A0_VECTOR
+#pragma vector=USCI_A0_VECTOR
 __interrupt void USCI_A0_ISR(void)
 {
-    if (UCA0IFG & UCRXIFG) {
-        // Save the received character and increment the character count.
-        id[idx++] = UCA0RXBUF;
+    switch(__even_in_range(UCA0IV, USCI_UART_UCTXCPTIFG))
+    {
+        case USCI_NONE: break;
+        case USCI_UART_UCRXIFG:
+            id[idx++] = UCA0RXBUF;
+            UCA0TXBUF = '*';       // Send '*' to PC
+            P2OUT ^= BIT1;        // Toggle Red LED
+            break;
+        case USCI_UART_UCTXIFG: break;
+        case USCI_UART_UCSTTIFG: break;
+        case USCI_UART_UCTXCPTIFG: break;
     }
 }
 
-// Luhn's algorithm for ID validation.
-uint8_t isValidID(char *id) {
+uint8_t isValidID(char *id)
+{
     int sum = 0;
-    uint8_t alt = 0;
+    int length = 16;
+    int digit = 0;
 
-    for (int i = 15; i >= 0; i--) {
-        int n = id[i] - '0';    // Convert character to number
-        if (alt) {
-            n *= 2;
-            if (n > 9) {
-                n -= 9;  // Subtract 9 if the result is two digits
+    for (int i = 0; i < length; i++)
+    {
+        digit = id[i] - '0';
+        if (i % 2 == 0)
+        {
+            digit *= 2;
+            if (digit > 9)
+            {
+                digit -= 9;
             }
         }
-        sum += n;
-        alt = !alt;   // Toggle the 'alternate' flag
+        sum += digit;
     }
-    return (sum % 10 == 0);  // If sum is a multiple of 10, the ID is valid.
+    return (sum % 10 == 0);
 }
