@@ -1,55 +1,55 @@
 #include <msp430.h>
 
 // Global variables
-char idNumber[17];
-int characterCount = 0;
+char idNumber[17];       // Array to store the 16-digit ID plus a null terminator.
+int characterCount = 0;  // Counter to keep track of how many characters have been received.
 
-// Function prototype to check if the ID is valid using the Luhn Algorithm
+// Function prototype declaration for the Luhn Algorithm check.
 int checkValidID(char *number);
 
 void main(void)
 {
-    // Disable the Watchdog Timer
+    // Disable the Watchdog Timer to prevent automatic resets.
     WDTCTL = WDTPW | WDTHOLD;
 
-    // Set LED pins as outputs
-    P1DIR |= BIT0;  // Green LED
-    P2DIR |= BIT1;  // Red LED
+    // Configure LED pins as outputs:
+    P1DIR |= BIT0;  // Green LED at P1.0 is set as an output.
+    P2DIR |= BIT1;  // Red LED at P2.1 is set as an output.
 
-    // UART setup
-    P1SEL0 |= BIT4 | BIT5;              // Assign UART pins
-    UCA0CTLW0 |= UCSWRST;               // Reset UART for configuration
-    UCA0CTLW0 |= UCSSEL_2;              // Use SMCLK
-    UCA0BR0 = 8;                        // Set baud rate to 115200
+    // UART (Universal Asynchronous Receiver-Transmitter) setup:
+    P1SEL0 |= BIT4 | BIT5;              // Select UART functionality for P1.4 (TX) and P1.5 (RX).
+    UCA0CTLW0 |= UCSWRST;               // Put UART into reset mode to allow configuration.
+    UCA0CTLW0 |= UCSSEL_2;              // Set clock source to SMCLK.
+    UCA0BR0 = 8;                        // Setting baud rate to 115200 with 1MHz clock.
     UCA0BR1 = 0;
-    UCA0MCTLW |= UCOS16 | UCBRF_10 | UCBRS_0;
-    UCA0CTLW0 &= ~UCSWRST;              // Release UART reset
-    UCA0IE |= UCRXIE;                   // Enable UART receive interrupt
+    UCA0MCTLW |= UCOS16 | UCBRF_10 | UCBRS_0; // Modulation for 115200 baud rate.
+    UCA0CTLW0 &= ~UCSWRST;              // Release UART from reset mode.
+    UCA0IE |= UCRXIE;                   // Enable the UART receive interrupt.
 
-    // Enable global interrupts
+    // Enable global interrupts for the MCU to respond to the interrupt events.
     __bis_SR_register(GIE);
 
-    // Infinite loop
+    // Infinite loop waiting for complete ID input.
     while (1)
     {
-        // Check once 16 characters are received
+        // Once all 16 characters of the ID are received:
         if (characterCount == 16)
         {
-            idNumber[characterCount] = '\0'; // End the string
-            characterCount = 0;              // Reset the counter
+            idNumber[characterCount] = '\0'; // Add a null terminator to convert char array to a valid C string.
+            characterCount = 0;              // Reset the character counter for next ID input.
 
-            // Check the ID
+            // Check the validity of the ID using the Luhn Algorithm.
             if (checkValidID(idNumber))
             {
-                P1OUT |= BIT0;               // Turn on the green LED
-                __delay_cycles(500000);      // Delay for 0.5 seconds
-                P1OUT &= ~BIT0;              // Turn off the green LED
+                P1OUT |= BIT0;               // Turn on the green LED indicating a valid ID.
+                __delay_cycles(500000);      // Wait for 0.5 seconds.
+                P1OUT &= ~BIT0;              // Turn off the green LED.
             }
             else
             {
-                P2OUT |= BIT1;               // Turn on the red LED
-                __delay_cycles(1000000);     // Delay for 1 second
-                P2OUT &= ~BIT1;              // Turn off the red LED
+                P2OUT |= BIT1;               // Turn on the red LED indicating an invalid ID.
+                __delay_cycles(1000000);     // Wait for 1 second.
+                P2OUT &= ~BIT1;              // Turn off the red LED.
             }
         }
     }
@@ -58,14 +58,16 @@ void main(void)
 #pragma vector=USCI_A0_VECTOR
 __interrupt void USCI_A0_ISR(void)
 {
+    // ISR for UART events:
     switch (__even_in_range(UCA0IV, USCI_UART_UCTXCPTIFG))
     {
         case USCI_NONE: break;
         case USCI_UART_UCRXIFG:
-            idNumber[characterCount] = UCA0RXBUF;   // Store received character
-            characterCount++;
-            P2OUT ^= BIT1;                         // Toggle red LED
-            UCA0TXBUF = '*';                       // Send '*' back to PC
+            // When a character is received over UART:
+            idNumber[characterCount] = UCA0RXBUF;   // Store the received character in the array.
+            characterCount++;                      // Increment the character counter.
+            P2OUT ^= BIT1;                         // Toggle the red LED as visual feedback.
+            UCA0TXBUF = '*';                       // Acknowledge by sending a '*' character back to the PC.
             break;
         case USCI_UART_UCTXIFG: break;
         case USCI_UART_UCSTTIFG: break;
@@ -73,22 +75,21 @@ __interrupt void USCI_A0_ISR(void)
     }
 }
 
-// Luhn algorithm to verify if the ID is valid
+// Function to implement the Luhn Algorithm:
 int checkValidID(char *number)
 {
-    // This function implements the Luhn algorithm and returns 1 if valid, else 0
     int sum = 0;
     int isAlternate = 0;
     for (int i = 15; i >= 0; i--)
     {
-        int n = number[i] - '0';
+        int n = number[i] - '0';         // Convert character to integer value.
         if (isAlternate)
         {
-            n = n * 2;
-            if (n > 9) n = n - 9;
+            n = n * 2;                   // Double every second digit.
+            if (n > 9) n = n - 9;        // If the result is two digits, subtract 9.
         }
-        sum += n;
-        isAlternate = !isAlternate;
+        sum += n;                        // Add to the cumulative sum.
+        isAlternate = !isAlternate;      // Toggle the alternate flag.
     }
-    return sum % 10 == 0;
+    return sum % 10 == 0;                // If the final sum is divisible by 10, it's a valid ID.
 }
